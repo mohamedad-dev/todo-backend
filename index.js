@@ -1,33 +1,12 @@
+require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
+const Todo = require('./models/todo')
 const app = express()
 
 app.use(express.json())
 app.use(express.static('dist'))
 app.use(cors())
-
-let todos = [
-  {
-    id: 1,
-    content: 'Complete online JavaScript course',
-    completed: false,
-  },
-  {
-    id: 2,
-    content: 'Jog around the park 3x',
-    completed: false,
-  },
-  {
-    id: 3,
-    content: 'Nekel',
-    completed: false,
-  },
-  {
-    id: 4,
-    content: 'Na3ti safrout yekel',
-    completed: true,
-  },
-]
 
 const requestLogger = (request, response, next) => {
   console.log('Method:', request.method)
@@ -42,40 +21,57 @@ app.get('/', (request, response) => {
   response.send('<h1>Hello world!</h1>')
 })
 app.get('/api/todos', (request, response) => {
-  response.json(todos)
+  Todo.find({}).then((todos) => {
+    response.json(todos)
+  })
 })
-app.get('/api/todos/:id', (request, response) => {
-  const id = Number(request.params.id)
-  const todo = todos.find((todo) => todo.id === id)
-  todo ? response.json(todo) : response.status(404).end()
-})
-app.delete('/api/todos/:id', (request, response) => {
-  const id = Number(request.params.id)
-  todos = todos.filter((todo) => todo.id !== id)
-  response.status(204).end()
+app.get('/api/todos/:id', (request, response, next) => {
+  Todo.findById(request.params.id)
+    .then((todo) => {
+      todo ? response.json(todo) : response.status(404).end()
+    })
+    .catch((error) => next(error))
 })
 
-const generateId = () => {
-  const maxId = todos.length > 0 ? Math.max(...todos.map((n) => n.id)) : 0
-  return maxId + 1
-}
-app.post('/api/todos', (request, response) => {
+app.post('/api/todos', (request, response, next) => {
   const body = request.body
 
-  if (!body.content) {
-    return response.status(400).json({
-      error: 'missing content',
-    })
-  }
-
-  const todo = {
+  const todo = new Todo({
     content: body.content,
     completed: false,
-    id: generateId(),
-  }
+  })
 
-  todos = [...todos, todo]
-  response.json(todo)
+  todo
+    .save()
+    .then((savedTodo) => {
+      response.json(savedTodo)
+    })
+    .catch((error) => next(error))
+})
+
+app.put('/api/todos/:id', (request, response, next) => {
+  const body = request.body
+  const todo = {
+    content: body.content,
+    completed: body.completed,
+  }
+  Todo.findByIdAndUpdate(request.params.id, todo, {
+    new: true,
+    runValidators: true,
+    context: 'query',
+  })
+    .then((updatedTodo) => {
+      response.json(updatedTodo)
+    })
+    .catch((error) => next(error))
+})
+
+app.delete('/api/todos/:id', (request, response, next) => {
+  Todo.findByIdAndDelete(request.params.id)
+    .then((result) => {
+      response.status(204).json(result)
+    })
+    .catch((error) => next(error))
 })
 
 const unknownEndpoint = (request, response) => {
@@ -83,7 +79,22 @@ const unknownEndpoint = (request, response) => {
 }
 app.use(unknownEndpoint)
 
-const PORT = process.env.PORT || 3001
+const errorHandler = (error, request, response, next) => {
+  console.error(error.message)
+
+  if (error.name === 'CastError') {
+    return response.status(400).send({ error: 'malformatted id' })
+  } else if (error.name === 'ValidationError') {
+    return response.status(400).send({ error: error.message })
+  }
+
+  next(error)
+}
+
+// this has to be the last loaded middleware.
+app.use(errorHandler)
+
+const PORT = process.env.PORT
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`)
 })
